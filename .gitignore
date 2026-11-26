@@ -1,0 +1,9 @@
+# Node / React
+frontend/node_modules/
+frontend/dist/
+
+# C# / .NET
+bin/
+obj/
+*.user
+*.suo
