@@ -1,8 +1,6 @@
-# Node / React
+node_modules/
 frontend/node_modules/
 frontend/dist/
-
-# C# / .NET
 bin/
 obj/
 *.user
