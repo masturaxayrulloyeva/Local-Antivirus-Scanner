@@ -2,6 +2,9 @@
 using System.IO;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Linq;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace fayl
 {
@@ -19,52 +22,77 @@ namespace fayl
         public string SkanerlanganVaqt { get; set; } = string.Empty;
         public int JamiTekshirilgan { get; set; }
         public List<ShubhaliFayl> TopilganFayllar { get; set; } = new();
+
+        // QO'SHILDI: Diskdagi eng katta 10 ta fayl uchun ro'yxat
+        public List<ShubhaliFayl> EngKattaFayllar { get; set; } = new();
     }
 
     class Program
     {
-        static List<ShubhaliFayl> topilganlar = new List<ShubhaliFayl>();
-        static int tekshirilganFayllar = 0;
-
         static void Main(string[] args)
         {
-            Console.WriteLine("Skanerlash boshlandi... Biroz kuting.\n");
+            var builder = WebApplication.CreateBuilder(args);
 
-            DriveInfo[] drives = DriveInfo.GetDrives();
-            foreach (DriveInfo drive in drives)
+            builder.Services.AddCors(options =>
             {
-                if (drive.IsReady)
+                options.AddPolicy("AllowReact", policy =>
+                    policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+            });
+
+            var app = builder.Build();
+            app.UseCors("AllowReact");
+
+            app.MapGet("/", () => Results.Ok(new
+            {
+                status = "Antivirus API ishlayapti",
+                skanerlashUchun = "http://localhost:5000/api/scan"
+            }));
+            app.MapGet("/api/scan", () =>
+            {
+                List<ShubhaliFayl> topilganlar = new List<ShubhaliFayl>();
+                // Barcha tekshirilgan fayllarning hajmi uchun vaqtinchalik ro'yxat
+                List<ShubhaliFayl> barchaFayllar = new List<ShubhaliFayl>();
+                int tekshirilganFayllar = 0;
+
+                Console.WriteLine("Skanerlash boshlandi... Biroz kuting.\n");
+
+                DriveInfo[] drives = DriveInfo.GetDrives();
+                foreach (DriveInfo drive in drives)
                 {
-                    Console.WriteLine($"Disk tekshirilmoqda: {drive.Name}");
-                    WalkDirectory(drive.RootDirectory.FullName);
+                    if (drive.IsReady)
+                    {
+                        WalkDirectory(drive.RootDirectory.FullName, topilganlar, barchaFayllar, ref tekshirilganFayllar);
+                    }
                 }
-            }
 
-            Console.WriteLine("\n========================");
-            Console.WriteLine("Skanerlash tugadi!");
-            Console.WriteLine($"Jami tekshirilgan fayllar: {tekshirilganFayllar}");
-            Console.WriteLine($"Topilgan Shubhali fayllar: {topilganlar.Count}");
+                // Eng katta 10 ta faylni topib olamiz
+                var top10Katta = barchaFayllar
+                    .OrderByDescending(f => f.Hajmi)
+                    .Take(10)
+                    .ToList();
 
-            // Natijani to'g'ridan-to'g'ri React frontend qismiga JSON qilib yozamiz
-            var hisobot = new SkanerHisoboti
-            {
-                SkanerlanganVaqt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                JamiTekshirilgan = tekshirilganFayllar,
-                TopilganFayllar = topilganlar
-            };
+                var hisobot = new SkanerHisoboti
+                {
+                    SkanerlanganVaqt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    JamiTekshirilgan = tekshirilganFayllar,
+                    TopilganFayllar = topilganlar,
+                    EngKattaFayllar = top10Katta
+                };
 
-            string jsonString = JsonSerializer.Serialize(hisobot, new JsonSerializerOptions { WriteIndented = true });
-            
-            // frontend/src/report.json papkasiga saqlaymiz
-            string frontendPath = Path.Combine(Directory.GetCurrentDirectory(), "frontend", "src", "report.json");
-            File.WriteAllText(frontendPath, jsonString);
+                Console.WriteLine("\n========================");
+                Console.WriteLine("Skanerlash tugadi!");
+                Console.WriteLine($"Jami tekshirilgan fayllar: {tekshirilganFayllar}");
+                Console.WriteLine($"Topilgan Shubhali fayllar: {topilganlar.Count}");
 
-            Console.WriteLine($"\nNatija frontendga muvaffaqiyatli yuborildi: {frontendPath}");
+                return Results.Ok(hisobot);
+            });
+
+            Console.WriteLine("Backend server ishga tushdi: http://localhost:5000");
+            app.Run("http://localhost:5000");
         }
 
-        static void WalkDirectory(string path)
+        static void WalkDirectory(string path, List<ShubhaliFayl> topilganlar, List<ShubhaliFayl> barchaFayllar, ref int tekshirilganFayllar)
         {
-            // Tizim papkalarini va node_modules ni chetlab o'tamiz
             if (path.Contains(@"\Windows", StringComparison.OrdinalIgnoreCase) ||
                 path.Contains(@"\Program Files", StringComparison.OrdinalIgnoreCase) ||
                 path.Contains(@"\Program Files (x86)", StringComparison.OrdinalIgnoreCase) ||
@@ -79,9 +107,28 @@ namespace fayl
                 foreach (string file in files)
                 {
                     tekshirilganFayllar++;
-                    string faylNomi = Path.GetFileName(file); // Path klassi orqali to'g'irlandi
+                    string faylNomi = Path.GetFileName(file);
+                    FileInfo fi;
 
-                    // Shubhali kengaytmalar to'g'ri tekshirilmoqda
+                    try
+                    {
+                        fi = new FileInfo(file);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    // Barcha fayllarni eng katta fayllarni saralash uchun qo'shib boramiz
+                    barchaFayllar.Add(new ShubhaliFayl
+                    {
+                        Nomi = faylNomi,
+                        Joylashuvi = file,
+                        Hajmi = fi.Length,
+                        YaratilganVaqti = fi.CreationTime.ToString("yyyy-MM-dd HH:mm"),
+                        XavfTuri = "Oddiy"
+                    });
+
                     bool ikkiQavatli = faylNomi.EndsWith(".pdf.exe", StringComparison.OrdinalIgnoreCase) ||
                                        faylNomi.EndsWith(".jpg.exe", StringComparison.OrdinalIgnoreCase) ||
                                        faylNomi.EndsWith(".docx.exe", StringComparison.OrdinalIgnoreCase);
@@ -91,7 +138,6 @@ namespace fayl
 
                     if (ikkiQavatli || xavfliScriptlar)
                     {
-                        FileInfo fi = new FileInfo(file);
                         topilganlar.Add(new ShubhaliFayl
                         {
                             Nomi = faylNomi,
@@ -110,12 +156,12 @@ namespace fayl
                 string[] subDirs = Directory.GetDirectories(path);
                 foreach (string subDir in subDirs)
                 {
-                    WalkDirectory(subDir);
+                    WalkDirectory(subDir, topilganlar, barchaFayllar, ref tekshirilganFayllar);
                 }
             }
             catch
             {
-                // Tizim ruxsat bermagan papkalar tashlab o'tiladi
+                // Ruxsat yo'q papkalar tashlab o'tiladi
             }
         }
     }

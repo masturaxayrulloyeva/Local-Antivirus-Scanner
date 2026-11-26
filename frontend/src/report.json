@@ -1,5 +1,13 @@
 {
-  "SkanerlanganVaqt": "2026-11-26 05:30:53",
-  "JamiTekshirilgan": 205408,
-  "TopilganFayllar": []
+  "SkanerlanganVaqt": "2026-11-26 20:19:59",
+  "JamiTekshirilgan": 204605,
+  "TopilganFayllar": [
+    {
+      "Nomi": "virus.docx.exe",
+      "Joylashuvi": "C:\\virus.docx.exe",
+      "Hajmi": 0,
+      "YaratilganVaqti": "2026-11-26 20:15",
+      "XavfTuri": "Ikki qavatli kengaytma"
+    }
+  ]
 }
